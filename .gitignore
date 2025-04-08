@@ -36,5 +36,11 @@ Thumbs.db
 *.mov
 *.wmv
 
-# Except keep the assets directory structure
+# Output files
+output/
+models/
+
+# Except keep the directory structure
 !assets/.gitkeep
+!output/.gitkeep
+!models/.gitkeep
