@@ -1,6 +1,24 @@
 """
-Core pose processing functionality for the ShadowCoach system
+Core pose processing functionality for the ShadowCoach system.
+
+This module handles video processing and pose detection using MediaPipe.
+It extracts key body landmarks and processes them for boxing technique analysis.
+
+Key Components:
+    - Video frame processing
+    - MediaPipe pose detection
+    - Landmark extraction and normalization
+    - Pose data smoothing
+
+The PoseProcessor class is the main entry point for video processing and pose detection.
+It provides a high-level interface while handling the complexities of computer vision
+and pose estimation internally.
+
+Usage Example:
+    processor = PoseProcessor()
+    poses = processor.process_video("boxing.mp4", output_path="analyzed.mp4")
 """
+
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -11,7 +29,22 @@ from ..utils.logging_utils import logger, timed
 
 class PoseProcessor:
     """
-    Class for processing videos and extracting pose data
+    Video processing and pose detection handler.
+
+    This class manages video processing and pose detection using MediaPipe.
+    It extracts and processes key body landmarks needed for boxing analysis.
+
+    Attributes:
+        mp_pose: MediaPipe pose solution
+        mp_drawing: MediaPipe drawing utilities
+        pose: MediaPipe pose detector instance
+        boxing_landmarks: List of key landmarks for boxing analysis
+        landmark_indices: Mapping of landmark names to MediaPipe indices
+
+    Example:
+        >>> processor = PoseProcessor()
+        >>> poses = processor.process_video("video.mp4")
+        >>> print(f"Processed {len(poses)} frames")
     """
     def __init__(self):
         """Initialize the pose processor with MediaPipe"""
@@ -25,10 +58,10 @@ class PoseProcessor:
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5
         )
-        
+
         # Key landmarks for boxing analysis
         self.boxing_landmarks = [
-            'nose', 
+            'nose',
             'left_shoulder', 'right_shoulder',
             'left_elbow', 'right_elbow',
             'left_wrist', 'right_wrist',
@@ -36,7 +69,7 @@ class PoseProcessor:
             'left_knee', 'right_knee',
             'left_ankle', 'right_ankle'
         ]
-        
+
         # Mapping from landmark names to MediaPipe indices
         self.landmark_indices = {
             'nose': 0,
@@ -47,59 +80,59 @@ class PoseProcessor:
             'left_knee': 25, 'right_knee': 26,
             'left_ankle': 27, 'right_ankle': 28
         }
-        
+
         logger.info("PoseProcessor initialized successfully")
-    
+
     @timed
-    def process_video(self, video_path: str, output_path: Optional[str] = None, 
+    def process_video(self, video_path: str, output_path: Optional[str] = None,
                      visualize: bool = True) -> List[Dict[str, Dict[str, float]]]:
         """
         Process a video and extract pose data
-        
+
         Args:
             video_path: Path to the video file
             output_path: Optional path to save the processed video
             visualize: Whether to visualize the pose landmarks
-            
+
         Returns:
             A time series of landmark positions
         """
         logger.info(f"Starting to process video: {video_path}")
-        
+
         video = cv2.VideoCapture(video_path)
         if not video.isOpened():
             logger.error(f"Could not open video file: {video_path}")
             return []
-            
+
         width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = video.get(cv2.CAP_PROP_FPS)
         frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-        
+
         logger.info(f"Video properties: {width}x{height}, {fps} FPS, {frame_count} frames")
-        
+
         # Output video writer
         if output_path:
             logger.info(f"Setting up output video: {output_path}")
             Path(output_path).parent.mkdir(exist_ok=True)
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-        
+
         # Process frames
         poses = []
         frame_idx = 0
-        
+
         while video.isOpened():
             success, frame = video.read()
             if not success:
                 break
-                
+
             # Convert to RGB for MediaPipe
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
+
             # Process with MediaPipe
             results = self.pose.process(rgb_frame)
-            
+
             # Extract landmarks if detected
             if results.pose_landmarks:
                 # Create a dictionary of landmark positions
@@ -113,91 +146,91 @@ class PoseProcessor:
                         'visibility': landmark.visibility
                     }
                 poses.append(pose_data)
-                
+
                 # Draw landmarks if visualizing
                 if visualize and output_path:
                     self.mp_drawing.draw_landmarks(
-                        frame, 
+                        frame,
                         results.pose_landmarks,
                         self.mp_pose.POSE_CONNECTIONS
                     )
-                    
+
                     # Add frame number
                     cv2.putText(
-                        frame, 
-                        f"Frame: {frame_idx}", 
-                        (10, 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 
-                        1, 
-                        (0, 255, 0), 
+                        frame,
+                        f"Frame: {frame_idx}",
+                        (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (0, 255, 0),
                         2
                     )
-            
+
             # Write to output video
             if output_path:
                 out.write(frame)
-                
+
             frame_idx += 1
-            
+
             # Log progress periodically
             if frame_idx % 100 == 0:
                 logger.info(f"Processed {frame_idx}/{frame_count} frames ({frame_idx/frame_count*100:.1f}%)")
-        
+
         # Release resources
         video.release()
         if output_path:
             out.release()
-            
+
         logger.info(f"Video processing complete. Extracted {len(poses)} poses from {frame_idx} frames.")
-        
+
         # Apply smoothing to reduce noise
         if poses:
             poses = self._smooth_pose_data(poses)
-            
+
         return poses
-    
+
     @timed
-    def _smooth_pose_data(self, poses: List[Dict[str, Dict[str, float]]], 
+    def _smooth_pose_data(self, poses: List[Dict[str, Dict[str, float]]],
                          window: int = 15, poly: int = 3) -> List[Dict[str, Dict[str, float]]]:
         """
         Apply smoothing to the pose data to reduce noise
-        
+
         Args:
             poses: The pose data to smooth
             window: The window size for the smoothing filter
             poly: The polynomial order for the smoothing filter
-            
+
         Returns:
             Smoothed pose data
         """
         if len(poses) < window:
             logger.warning(f"Not enough frames for smoothing: {len(poses)} < {window}")
             return poses
-            
+
         # Make window odd if it's even
         if window % 2 == 0:
             window += 1
-            
+
         logger.info(f"Smoothing pose data with window={window}, poly={poly}")
-        
+
         # Create a deep copy of the pose data
         smoothed_poses = [{k: v.copy() for k, v in pose.items()} for pose in poses]
-        
+
         # For each landmark and dimension, apply Savitzky-Golay filter
         for landmark in self.boxing_landmarks:
             for dim in ['x', 'y', 'z']:
                 # Extract the values
                 values = [pose[landmark][dim] for pose in poses if landmark in pose]
-                
+
                 if len(values) >= window:
                     # Apply smoothing
                     from scipy.signal import savgol_filter
                     smoothed_values = savgol_filter(values, window, poly)
-                    
+
                     # Update the smoothed poses
                     for i, pose in enumerate(smoothed_poses):
                         if landmark in pose:
                             pose[landmark][dim] = smoothed_values[i]
-        
+
         logger.info("Pose data smoothing complete")
         return smoothed_poses
